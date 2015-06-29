@@ -153,6 +153,7 @@ void DeviceINQ::EIO_Inquire(uv_work_t *req) {
     int max_rsp;
     int dev_id, len, flags;
 
+    
     dev_id = hci_get_route(NULL);
     baton->sock = hci_open_dev( dev_id );
     if (dev_id < 0 || baton->sock < 0) {
@@ -174,6 +175,12 @@ void DeviceINQ::EIO_AfterInquire(uv_work_t *req) {
     char name[248] = { 0 };
     inquiry_info* ii = (inquiry_info*)baton->inquiry_info;
 
+    Local<Object> inquire = NanNew<Object>(baton->handle);
+
+    if (baton->num_rsp < 0) {
+        baton->num_rsp = 0;
+    }
+
     for (i = 0; i < baton->num_rsp; i++) {
       ba2str(&(ii+i)->bdaddr, addr);
       memset(name, 0, sizeof(name));
@@ -189,7 +196,7 @@ void DeviceINQ::EIO_AfterInquire(uv_work_t *req) {
           NanNew(name)
       };
 
-      NanMakeCallback(baton->handle, "emit", 3, argv);
+      NanMakeCallback(inquire, "emit", 3, argv);
     }
 
     free( baton->inquiry_info );
@@ -198,13 +205,14 @@ void DeviceINQ::EIO_AfterInquire(uv_work_t *req) {
         NanNew("finished")
     };
 
-    NanMakeCallback(baton->handle, "emit", 1, argv);
+    NanMakeCallback(inquire, "emit", 1, argv);
 
     close( baton->sock );
 
+    NanDisposePersistent(baton->handle);
     baton->inquire->Unref();
     delete baton;
-    baton = NULL;        
+    baton = NULL;
 }
 
 void DeviceINQ::Init(Handle<Object> target) {
@@ -258,8 +266,7 @@ NAN_METHOD(DeviceINQ::Inquire) {
     inquire_baton_t *baton = new inquire_baton_t();
     baton->inquire = inquire;
 
-    //TODO grab persistent version of this?
-    baton->handle = args.This();
+    NanAssignPersistent(baton->handle, args.This());
     baton->request.data = baton;
     baton->inquire->Ref();
 

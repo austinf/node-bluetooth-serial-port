@@ -52,7 +52,8 @@ class DeviceINQ : public node::ObjectWrap {
             int num_rsp;
             int sock;
             uv_work_t request;
-            v8::Handle<v8::Object> handle;
+
+            v8::Persistent<v8::Object> handle;
         };
 
         DeviceINQ();

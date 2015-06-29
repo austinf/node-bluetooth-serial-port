@@ -110,7 +110,7 @@ void BTSerialPortBinding::EIO_Write(uv_work_t *req) {
 
     data->result = write(rfcomm->s, data->bufferData, data->bufferLength);
 
-    if (data->result != data->bufferLength) {
+    if ((size_t)data->result != data->bufferLength) {
         sprintf(data->errorString, "Writing attempt was unsuccessful");
     }
 }
