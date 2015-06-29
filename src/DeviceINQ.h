@@ -34,6 +34,8 @@ class DeviceINQ : public node::ObjectWrap {
         static void Init(v8::Handle<v8::Object> exports);
         static void EIO_SdpSearch(uv_work_t *req);
         static void EIO_AfterSdpSearch(uv_work_t *req);
+        static void EIO_Inquire(uv_work_t *req);
+        static void EIO_AfterInquire(uv_work_t *req);
 
     private:
         struct sdp_baton_t {
@@ -42,6 +44,15 @@ class DeviceINQ : public node::ObjectWrap {
             NanCallback* cb;
             int channelID;
             char address[40];
+        };
+
+        struct inquire_baton_t {
+            DeviceINQ* inquire;
+            void *inquiry_info;
+            int num_rsp;
+            int sock;
+            uv_work_t request;
+            v8::Handle<v8::Object> handle;
         };
 
         DeviceINQ();

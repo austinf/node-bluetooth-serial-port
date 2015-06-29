@@ -146,6 +146,67 @@ void DeviceINQ::EIO_AfterSdpSearch(uv_work_t *req) {
     baton = NULL;
 }
 
+void DeviceINQ::EIO_Inquire(uv_work_t *req) {
+    inquire_baton_t *baton = static_cast<inquire_baton_t *>(req->data);
+
+    // do the bluetooth magic
+    int max_rsp;
+    int dev_id, len, flags;
+
+    dev_id = hci_get_route(NULL);
+    baton->sock = hci_open_dev( dev_id );
+    if (dev_id < 0 || baton->sock < 0) {
+        NanThrowError("opening socket");
+    }
+
+    len  = 8;
+    max_rsp = 255;
+    flags = IREQ_CACHE_FLUSH;
+    baton->inquiry_info = malloc(max_rsp * sizeof(inquiry_info));
+
+    baton->num_rsp = hci_inquiry(dev_id, len, max_rsp, NULL, (inquiry_info**)&baton->inquiry_info, flags);
+}
+
+void DeviceINQ::EIO_AfterInquire(uv_work_t *req) {
+    inquire_baton_t *baton = static_cast<inquire_baton_t *>(req->data);
+    int i;
+    char addr[19] = { 0 };
+    char name[248] = { 0 };
+    inquiry_info* ii = (inquiry_info*)baton->inquiry_info;
+
+    for (i = 0; i < baton->num_rsp; i++) {
+      ba2str(&(ii+i)->bdaddr, addr);
+      memset(name, 0, sizeof(name));
+
+      if (hci_read_remote_name(baton->sock, &(ii+i)->bdaddr, sizeof(name), 
+                  name, 0) < 0) {
+          strcpy(name, addr);
+      }
+
+      Local<Value> argv[3] = {
+          NanNew("found"),
+          NanNew(addr),
+          NanNew(name)
+      };
+
+      NanMakeCallback(baton->handle, "emit", 3, argv);
+    }
+
+    free( baton->inquiry_info );
+
+    Local<Value> argv[1] = {
+        NanNew("finished")
+    };
+
+    NanMakeCallback(baton->handle, "emit", 1, argv);
+
+    close( baton->sock );
+
+    baton->inquire->Unref();
+    delete baton;
+    baton = NULL;        
+}
+
 void DeviceINQ::Init(Handle<Object> target) {
     NanScope();
 
@@ -192,56 +253,17 @@ NAN_METHOD(DeviceINQ::Inquire) {
         NanThrowError(usage);
     }
 
-    // do the bluetooth magic
-    inquiry_info *ii = NULL;
-    int max_rsp, num_rsp;
-    int dev_id, sock, len, flags;
-    int i;
-    char addr[19] = { 0 };
-    char name[248] = { 0 };
+    DeviceINQ* inquire = ObjectWrap::Unwrap<DeviceINQ>(args.This());
 
-    dev_id = hci_get_route(NULL);
-    sock = hci_open_dev( dev_id );
-    if (dev_id < 0 || sock < 0) {
-        NanThrowError("opening socket");
-    }
+    inquire_baton_t *baton = new inquire_baton_t();
+    baton->inquire = inquire;
 
-    len  = 8;
-    max_rsp = 255;
-    flags = IREQ_CACHE_FLUSH;
-    ii = (inquiry_info*)malloc(max_rsp * sizeof(inquiry_info));
+    //TODO grab persistent version of this?
+    baton->handle = args.This();
+    baton->request.data = baton;
+    baton->inquire->Ref();
 
-    num_rsp = hci_inquiry(dev_id, len, max_rsp, NULL, &ii, flags);
-    // if( num_rsp < 0 ) {
-    //     return ThrowException(Exception::Error(String::New("hci inquiry")));
-    // }
-
-    for (i = 0; i < num_rsp; i++) {
-      ba2str(&(ii+i)->bdaddr, addr);
-      memset(name, 0, sizeof(name));
-      if (hci_read_remote_name(sock, &(ii+i)->bdaddr, sizeof(name), 
-          name, 0) < 0)
-        strcpy(name, addr);
-
-      // fprintf(stderr, "%s [%s]\n", addr, name);
-
-      Local<Value> argv[3] = {
-          NanNew("found"),
-          NanNew(addr),
-          NanNew(name)
-      };
-
-      NanMakeCallback(args.This(), "emit", 3, argv);
-    }
-
-    free( ii );
-    close( sock );
-
-    Local<Value> argv[1] = {
-        NanNew("finished")
-    };
-
-    NanMakeCallback(args.This(), "emit", 1, argv);
+    uv_queue_work(uv_default_loop(), &baton->request, EIO_Inquire, (uv_after_work_cb)EIO_AfterInquire);
 
     NanReturnUndefined();
 }
